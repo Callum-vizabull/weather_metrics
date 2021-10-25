@@ -17,6 +17,9 @@ import vbdb.db as db
 from vbdb.db import Company
 logger = logging.getLogger(__name__)
 
+from chalicelib import util
+
+
 
 def load_weather_daily_dataframe(start_date: datetime,
                                  end_date: datetime = datetime.now(),
@@ -306,16 +309,8 @@ def generate_excel(df1: pd.DataFrame, period: str, companies: [Company], metadat
 
     # Aggregates the data by state and then by 
     if period == "custom_weekly":
-        import math
-        import datetime
-        def day_of_year(date):
-            first = datetime.date(date.year,1,1)
-            return (pd.to_datetime(date) - pd.to_datetime(first)).days 
-        def get_week(date):
-            mod = math.floor(day_of_year(date)/7)
-            mod = min(mod,51)
-            return mod
-        df["week_of_year"] = df.date.apply(get_week)
+
+        df["week_of_year"] = df.date.apply(util.get_week)
         state_df = df.groupby([df.airport_code.map(agg.airports_to_states), "date"]).agg(week_location_agg
                                                                                          ).reset_index().groupby(
             ["airport_code", "week_of_year"]).agg(week_time_agg).reset_index().drop("week_of_year",axis=1)
@@ -324,7 +319,6 @@ def generate_excel(df1: pd.DataFrame, period: str, companies: [Company], metadat
         state_df = df.groupby([df.airport_code.map(agg.airports_to_states), "date"]).agg(location_agg
                                                                                          ).reset_index().groupby(
             ["airport_code", pd.Grouper(key="date", freq=period)]).agg(time_agg).reset_index()
-    print(state_df.columns)
     # merges number of airports per state as a column to each entry. Used to normalize
     state_df = state_df.merge(
         pd.DataFrame.from_dict({k: [len(v)] for k, v in agg.states_to_airports.items()}, orient='index',

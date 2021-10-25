@@ -118,8 +118,10 @@ def get_end_month_from_ticker(ticker):
 def get_week(date):
     mod = math.floor(day_of_year(date)/7)
     mod = min(mod,51)
-    return mod
+    return (date.year,mod)
 def day_of_year(date):
+    if type(date) != datetime.date:
+        date = date.date()
     first = datetime.date(date.year,1,1)
     return (date - first).days 
 def get_week_date(date):
@@ -239,4 +241,5 @@ def alchemyencoder(obj):
         dictret = dict(obj.__dict__)
         dictret.pop('_sa_instance_state', None)
         return dictret
-    
+import math
+import datetime
