@@ -1,0 +1,9 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'vbocto resources'
+
+Resources:
+  EarningsUpdateQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      VisibilityTimeout: 1500
+      QueueName: weather-metrics-backtesting
