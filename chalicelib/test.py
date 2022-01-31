@@ -25,28 +25,37 @@ from chalicelib.dbcalls import (
     get_engine,
 )
 
+import traceback
+import calendar
+
+
 
 companies = list(util.get_db_conn().session.query(db.Company))
 
+def consolidate_weather_by_period(period,lookback=180):
+    return test(period,lookback=180)
 def test(period,lookback=180):
     start_date = datetime.date.today() - datetime.timedelta(days=lookback)
     df = load_weather_daily_dataframe(start_date,connection = util.get_db_conn_string())
 
     df_list = []
-    for i in range(4):
-        companies_in_qtr = [c for c in companies if c.weather and len(c.locations)>0 and c.fiscal_yr_end_month % 4 == i
+    # companies 
+    for i in range(3):
+        companies_in_qtr = [c for c in companies if c.weather and len(c.locations)>0 and c.fiscal_yr_end_month % 3 == i
                            and sum([x.store_count for x in c.locations]) > 0]
 
-        date= datetime.date(2021,i+3,1)
+        date= datetime.date(2021,i+1,1)
         if period=="week":
             period_string="custom_weekly"
         if period == "month":
             period_string = "MS"
         if period =="quarter":
             period_string = "QS-" + date.strftime('%b').upper()
-        df_list.append(datafun.generate_excel(df,period=period_string,companies=companies_in_qtr))
+        quarter_df = datafun.generate_excel(df,period=period_string,companies=companies_in_qtr)
+        assert len(quarter_df) > 0, f"quarter_df {i} is empty"
+        df_list.append(quarter_df)
     large_df_list = []
-    for i in range(4):
+    for i in range(3):
         temp_df_list = []
         for j in range(len(df_list[i])):
             if "eights" in df_list[i][j][0]:
@@ -88,14 +97,20 @@ def metrics_qtd_weather(ticker,start,end):
     return json.dumps(list(df_result.to_dict('records')), default=util.alchemyencoder)
 
 
-def earning_date_to_quarter_start(date,fiscal_yr_end_month):
+def earning_date_to_quarter_start(date,fiscal_yr_end_month,debug=False):
+    # this happens on month + 1. just subtract 1 month
     in_month = (int(date.strftime('%m')) - fiscal_yr_end_month  -1)% 12
+    # in quarter 0-4
     in_quarter = math.floor((in_month ) / 3)
+    
     target_quarter = (in_quarter -1)  % 4
-    target_month = (target_quarter) * 3
+    target_month = (target_quarter+1) * 3
+    if debug:
+        print(in_month,in_quarter,target_quarter,target_month)
     target_year = date.year if target_month < in_month else date.year-1
     # print(in_month,in_quarter,target_quarter)
-    return datetime.date(target_year,(target_month + fiscal_yr_end_month - 1) % 12 + 1,1)
+    month = (target_month + fiscal_yr_end_month - 1) % 12 + 1
+    return datetime.date(target_year,month,calendar.monthrange(target_year, month)[1])
 def get_revenue_df(ticker,debug=False):
     try:
         revenue_df = pd.read_sql(f"""Select * from revenue_table where "Page_URL" like '%%{ticker}%%';""", util.get_db_conn_string())
@@ -133,30 +148,59 @@ def get_revenue_df(ticker,debug=False):
         raise RuntimeError(ticker)
     return revenues    
 
-def save_backtesting_on_ticker(ticker,date_string,debug=False):
+def get_yoy_weather_for_backtesting(ticker):
+    signal_df = pd.read_sql(f"""Select * from weather_yoy_metric_table where ticker='{ticker}' and 
+                period = 'quarter' and region ='Total';""",con=util.get_db_conn_string())
+    signal_df = signal_df.sort_values("date",ascending=False).drop_duplicates(["date"])
+    
+    metrics = ['cold_count', 'heat_count',
+           'rain_and_sleet', 'rain_count', 'sleet', 'sleet_count', 'snow',
+           'snow_count', 'temp_24h_mean', 'weekend_cold_count',
+           'weekend_heat_count', 'weekend_rain_count', 'weekend_sleet_count',
+           'weekend_snow_count']
+    signal_df.drop(["ticker","region","update_day","period"],axis=1)
+    values_df = signal_df[metrics+["date"]].iloc[[0]]
+    input_df = signal_df[metrics+["date"]].copy()
+    
+    return values_df,input_df
+def get_signed_yoy_weather_for_backtesting(ticker):
+    signal_df = pd.read_sql(f"""Select * from weather_signed_yoy_metrics where ticker='{ticker}';""",con=util.get_db_conn_string())
+    signal_df = signal_df.sort_values("date",ascending=False).drop_duplicates(["date"])
+    
+    metrics = ['cold_count', 'heat_count',
+           'rain_and_sleet', 'rain_count', 'sleet', 'sleet_count', 'snow',
+           'snow_count', 'temp_24h_mean', 'weekend_cold_count',
+           'weekend_heat_count', 'weekend_rain_count', 'weekend_sleet_count',
+           'weekend_snow_count']
+    values_df = signal_df[metrics+["date"]].iloc[[0]]
+    input_df = signal_df[metrics+["date"]].copy()
+    
+    return values_df,input_df
+def save_backtesting_on_ticker(ticker,date_string,debug=False,test=False):
     try:
-        signal_df = pd.read_sql(f"""Select * from weather_yoy_metric_table where ticker='{ticker}' and 
-            period = 'quarter' and region ='Total';""",con=util.get_db_conn_string())
-        signal_df = signal_df.sort_values("date",ascending=False).drop_duplicates(["date"])
-        
         fiscal_year_end =dbcalls.get_db_conn().session.query(db.Company).filter(db.Company.id ==dbcalls.get_ticker_id()[ticker]).all()[0].fiscal_yr_end
+
         metrics = ['cold_count', 'heat_count',
-               'rain_and_sleet', 'rain_count', 'sleet', 'sleet_count', 'snow',
-               'snow_count', 'temp_24h_mean', 'weekend_cold_count',
-               'weekend_heat_count', 'weekend_rain_count', 'weekend_sleet_count',
-               'weekend_snow_count']
-        signal_df.drop(["ticker","region","update_day","period"],axis=1)
-        values_df = signal_df[metrics+["date"]].iloc[[0]]
-        input_df = signal_df[metrics+["date"]].copy()
+           'rain_and_sleet', 'rain_count', 'snow',
+           'snow_count', 'temp_24h_mean', 'weekend_cold_count',
+           'weekend_heat_count', 'weekend_rain_count',
+           'weekend_snow_count']
+        values_df,input_df = get_signed_yoy_weather_for_backtesting(ticker)
+        assert len(input_df) > 0, "input df is empty"
+        def get_sign_for_metric(metric,date):
+            return 1
         for m in metrics:
-            input_df[m] = input_df[m]>0
+            input_df[m] = input_df[m] * input_df.date.apply(lambda date: get_sign_for_metric(m,date)) > 0
     
     
         revenue_ticker_df = get_revenue_df(ticker)[["Date","Qtr","BEAT"]]
-        revenue_ticker_df["quarter_start"]=revenue_ticker_df.Date.apply(lambda x: pd.to_datetime(
+        revenue_ticker_df["quarter_end"]=revenue_ticker_df.Date.apply(lambda x: pd.to_datetime(
             earning_date_to_quarter_start(x,fiscal_year_end.month)))
-        scored_df = pd.merge(revenue_ticker_df,input_df,left_on="quarter_start",right_on="date").sort_values("date").drop(["Date","quarter_start"],axis=1)
+        assert len(revenue_ticker_df) > 0 , "revenue df empty"
+        scored_df = pd.merge(revenue_ticker_df,input_df,left_on="quarter_end",right_on="date").sort_values("date").drop(["Date","quarter_end"],axis=1)
+        assert len(scored_df) > 0, "scored df empty"
         signal, prediction, strength,meta_df  = metrics_lib.new_get_best_signal(scored_df.iloc[1:],scored_df.iloc[[0]])
+        assert len(prediction) > 0 and len(signal) >0 ,"prediction is empty"
         results_dict = {}
     
         results_dict["final_value"] = prediction.values[0]
@@ -166,7 +210,7 @@ def save_backtesting_on_ticker(ticker,date_string,debug=False):
         results_dict["update_date"] = date_string
         results_dict["ticker"] = ticker
         results_dict["final_wr"]=strength[0]
-        results_dict["final_value"]=   prediction[0]
+        # results_dict["final_value"]=   prediction[0]
         
         wr_df = scored_df.copy()
         for c in wr_df.columns:
@@ -174,16 +218,21 @@ def save_backtesting_on_ticker(ticker,date_string,debug=False):
                 wr_df[c+"_wr"] = wr_df[c]==wr_df.BEAT
                 
         results_dict.update(wr_df[[c for c in wr_df.columns if c!="BEAT" and c!="Qtr" and c!="date"]].iloc[1:].mean().to_dict())
-        results_dict.update(signal_df[metrics].iloc[0].to_dict())
+        results_dict.update(values_df)
+        assert len(values_df) > 0
         if debug:
             return results_dict 
         else:
-            pd.DataFrame(results_dict, index=[0]).to_sql("saved_weather_backtesting", con=dbcalls.get_db_conn_string(), index=False, if_exists="append")
-            delete_query = """ DELETE FROM saved_weather_backtesting where update_date not in (select max(update_date) from saved_weather_backtesting) and ticker = '{ticker}';"""
-            with dbcalls.get_engine().connect() as con:
-                con.execute(delete_query)
-    except:
-        print("failed on ",ticker,date_string)
+            if not test:
+                pd.DataFrame(results_dict, index=[0]).to_sql("saved_weather_backtesting", con=dbcalls.get_db_conn_string(), index=False, if_exists="append")
+                delete_query = """ DELETE FROM saved_weather_backtesting where update_date not in (select max(update_date) from saved_weather_backtesting) and ticker = '{ticker}';"""
+                with dbcalls.get_engine().connect() as con:
+                    con.execute(delete_query)
+            if test:
+                return pd.DataFrame(results_dict, index=[0])
+    except Exception as e:
+        print("failed on ",ticker,date_string, e)
+        print(traceback.format_exc())
 def save_backtesting(event):
     date_string =  str(datetime.date.today())
     for record in event:
@@ -204,6 +253,7 @@ def run_backtesting():
         # print(msg_body)
         sqs_client.send_message(QueueUrl=sqs_queue_url_ticker,
                                               MessageBody=json.dumps(msg_body, cls=util.DecimalEncoder))
+
 def write_weather_by_period(period,lookback=180):
     df = test(period,lookback)
     date_string =  str(datetime.date.today())

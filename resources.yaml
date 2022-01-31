@@ -7,3 +7,8 @@ Resources:
     Properties:
       VisibilityTimeout: 1500
       QueueName: weather-metrics-backtesting
+  ApplySignQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      VisibilityTimeout: 1500
+      QueueName: weather-metrics-apply-sign

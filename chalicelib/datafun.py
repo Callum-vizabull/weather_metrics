@@ -311,6 +311,7 @@ def generate_excel(df1: pd.DataFrame, period: str, companies: [Company], metadat
     if period == "custom_weekly":
 
         df["week_of_year"] = df.date.apply(util.get_week)
+        df["year"] = df.date.apply(lambda x : x.year)
         state_df = df.groupby([df.airport_code.map(agg.airports_to_states), "date"]).agg(week_location_agg
                                                                                          ).reset_index().groupby(
             ["airport_code", "week_of_year"]).agg(week_time_agg).reset_index().drop("week_of_year",axis=1)
