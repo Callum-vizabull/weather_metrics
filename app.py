@@ -1,6 +1,7 @@
 from chalice import Chalice
 
 import datetime
+
 app = Chalice(app_name='weather_metrics')
 
 from chalicelib import test 
@@ -11,7 +12,7 @@ def index():
     return {'hello': 'world'}
  
 import vbdb.db as db
-
+import chalicelib.schedulers as schedulers
 
 
         
@@ -29,18 +30,27 @@ def update_weather_month(event):
 @app.schedule(schedule_string)
 def update_weather_year(event):
         return create_dataframes.write_weather_by_period("quarter")
+
+
 @app.schedule(yoy_schedule_string)
 def update_weather_yoy(event):
     create_dataframes.write_weather_yoy("quarter")
     create_dataframes.write_weather_yoy("month")
     create_dataframes.write_weather_yoy("week")
     return "Done"
-@app.schedule(sign_schedule_string)
-def sign_metrics(event):
-        return signing.run_apply_sign()
+
 @app.route('/weather_qtd/{ticker}/{start_date}/{end_date}')
 def weather_qtd(ticker,start_date,end_date):
     return test.metrics_qtd_weather(ticker,start_date,end_date)
+
+## ADD things to queues
+@app.schedule(backtesting_schedule_string)
+def update_all_backtesting(event):
+    schedulers.run_backtesting()
+@app.schedule(sign_schedule_string)
+def sign_metrics(event):
+    return schedulers.run_apply_sign()
+    
 import os
 @app.on_sqs_message(queue=os.environ['WEATHER_BACKTESTING_QUEUE'], batch_size=1)
 def update_backtesting(event):
@@ -48,6 +58,3 @@ def update_backtesting(event):
 @app.on_sqs_message(queue=os.environ['WEATHER_SIGN_QUEUE'], batch_size=1)
 def apply_sign(event):
     return signing.apply_sign_handler(event)
-@app.schedule(backtesting_schedule_string)
-def update_all_backtesting(event):
-    create_dataframes.run_backtesting()

@@ -76,15 +76,3 @@ def apply_sign_handler(event):
             apply_sign(ticker)
     return {'event': event}
 
-def run_apply_sign():
-    sqs_client = boto3.client('sqs')
-    sqs_queue_url_ticker = sqs_client.get_queue_url(QueueName="weather-metrics-apply-sign")['QueueUrl']
-                                          
-    query = "select distinct(wt.ticker) from weather_yoy_metric_table wt inner join weather_rule_set rt on wt.ticker = rt.ticker;"
-    tickers = [x[0] for x in pd.read_sql(query,con=util.get_db_conn_string()).values]
-    
-    for ticker in tickers:
-        msg_body = [{"ticker":ticker}]
-        sqs_client.send_message(QueueUrl=sqs_queue_url_ticker,
-                                              MessageBody=json.dumps(msg_body, cls=util.DecimalEncoder))
-    return 1

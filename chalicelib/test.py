@@ -9,7 +9,7 @@ import json
 import chalicelib.agg as agg
 import chalicelib.datafun as datafun
 from chalicelib import metrics as metrics_lib
-from chalicelib.datafun import load_weather_daily_dataframe, generate_quarterly_excel,generate_monthly_excel
+from chalicelib.datafun import load_weather_daily_dataframe
 
 import vbdb.db as db
 
@@ -58,7 +58,7 @@ def test(period,lookback=180):
     for i in range(3):
         temp_df_list = []
         for j in range(len(df_list[i])):
-            if "eights" in df_list[i][j][0]:
+            if "eights" in df_list[i][j][0].lower():
                 continue
             df_temp = df_list[i][j][1].reset_index().melt(id_vars=["Ticker","index"])
             df_temp.columns = ["ticker","region","date","value"]
@@ -242,17 +242,6 @@ def save_backtesting(event):
             save_backtesting_on_ticker(ticker,date_string)
     return {"outcome":"success"}
 
-def run_backtesting():
-    sqs_client = boto3.client('sqs')
-    sqs_queue_url_ticker = sqs_client.get_queue_url(QueueName="weather-metrics-backtesting")['QueueUrl']
-                                          
-    query = "Select distinct(ticker) from weather_yoy_metric_table"
-    tickers = [x[0] for x in pd.read_sql(query,con=util.get_db_conn_string()).values]
-    for ticker in tickers:
-        msg_body = [{"ticker":ticker}]
-        # print(msg_body)
-        sqs_client.send_message(QueueUrl=sqs_queue_url_ticker,
-                                              MessageBody=json.dumps(msg_body, cls=util.DecimalEncoder))
 
 def write_weather_by_period(period,lookback=180):
     df = test(period,lookback)
