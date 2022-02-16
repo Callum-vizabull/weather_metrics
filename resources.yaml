@@ -12,3 +12,8 @@ Resources:
     Properties:
       VisibilityTimeout: 1500
       QueueName: weather-metrics-apply-sign
+  BuildPeriodicMetricsQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      VisibilityTimeout: 1500
+      QueueName: build-periodic-metrics-queue

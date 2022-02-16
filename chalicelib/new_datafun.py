@@ -18,8 +18,8 @@ from vbdb.db import Company
 logger = logging.getLogger(__name__)
 
 from chalicelib import util
-
-
+import requests
+import numpy as np
 
 def load_weather_daily_dataframe(start_date: datetime,
                                  end_date: datetime = datetime.now(),
@@ -176,67 +176,6 @@ def get_companies_by_month(month=datetime.today().month - 1):
     return list(cal[(cal['Q1'] % 3) == (month % 3)].Ticker.values)
 
 
-def generate_monthly_excel(df: pd.DataFrame, period: str, companies: [Company],
-                           metadata: dict = {}):
-        # excel = pd.ExcelWriter(output, engine="openpyxl")
-    names, df_list = zip(*generate_excel(df, period, companies))
-    df_list, names = list(df_list), list(names)
-    df_list.append(pd.DataFrame.from_dict(metadata, orient='index'))
-    names = ['Mean', 'Precip', 'Precip Days', 'Precip Weekend Days', 'Snow',
-                 'Snow Days', 'Snow Weekend Days', 'Sleet', 'Sleet Days', 'Sleet Weekend Days',
-                 'Cold', 'Weekend Cold', 'Heat', 'Weekend Heat', 'Region Weights',
-                 'State Weights', 'Metadata']
-    return df_list, names
-
-def generate_quarterly_excel(df: pd.DataFrame, quarter_end: datetime, companies: [Company],
-                             metadata: dict = {}):
-    q_freq = "Q-" + quarter_end.strftime('%b').upper()
-    # grouped = df.groupby(pd.Grouper(key="date", freq=q_freq))
-    # good_dfs = []
-    # for t in grouped.groups:
-    #     if t.month == quarter_end.month:
-    #         good_dfs.append(grouped.get_group(t))
-    # good_df = pd.concat(good_dfs)
-
-    # _, monthly_dfs = zip(*generate_excel(good_df, "M", [company], metadata))
-    _, quarterly_dfs = zip(*generate_excel(good_df, q_freq, companies, metadata))
-    # monthly_dfs, quarterly_dfs = list(monthly_dfs), list(quarterly_dfs)
-    quarterly_dfs =  list(quarterly_dfs)
-
-    quarterly_dfs.append(pd.DataFrame.from_dict(metadata, orient='index'))
-    # monthly_dfs.append(pd.DataFrame.from_dict(metadata, orient='index'))
-
-    # drop non quarter dates
-    quarterly_dfs = list(map(lambda x: x.drop("Ticker", axis=1).rename(lambda x: "Quarter ending in " +
-                                                                                 str(pd.to_datetime(
-                                                                                     x).month) + "-" + str(
-        pd.to_datetime(x).year), axis=1), quarterly_dfs[:-3])) + quarterly_dfs[-3:]
-    names = ['Mean', 'Precip', 'Precip Days', 'Precip Weekend Days', 'Snow',
-             'Snow Days', 'Snow Weekend Days', 'Sleet', 'Sleet Days', 'Sleet Weekend Days',
-             'Cold', 'Weekend Cold', 'Heat', 'Weekend Heat', 'Region Weights',
-             'State Weights', 'Metadata']
-    # return monthly_dfs,quarterly_dfs,names
-    return quarterly_dfs,names
-
-
-
-
-def region_and_state_weights(locations):
-    df = pd.DataFrame([{k: v for k, v in vars(l).items() if not k.startswith('_')} for l in locations])
-    state_weights = pd.DataFrame(data={})
-    region_weights = pd.DataFrame(data={})
-    for region in agg.default_us_region_groupings.items():
-        states = region[1]
-        states.sort()
-        region = region[0]
-        region_df = df[df['iso_region'].isin(states)]
-        state_weights = state_weights.append(pd.DataFrame(
-            data={'iso-region': states, 'store_count': region_df['store_count'] / region_df['store_count'].sum()}))
-        region_weights = region_weights.append(pd.DataFrame(
-            data={'region': [region], 'store_count': [region_df['store_count'].sum() / df['store_count'].sum()]}))
-    state_weights = state_weights.set_index('iso-region').sort_index(ascending=True)
-    region_weights = region_weights.set_index('region').sort_index(ascending=True)
-    return region_weights, state_weights
 
 
 def generate_excel(df1: pd.DataFrame, period: str, companies: [Company], metadata: dict = {}):
@@ -311,51 +250,23 @@ def generate_excel(df1: pd.DataFrame, period: str, companies: [Company], metadat
     if period == "custom_weekly":
 
         df["week_of_year"] = df.date.apply(util.get_week)
-        df["year"] = df.date.apply(lambda x : x.year)
-        state_df = df.groupby([df.airport_code.map(agg.airports_to_states), "date"]).agg(week_location_agg
-                                                                                         ).reset_index().groupby(
+        # df["year"] = df.date.apply(lambda x : x.year)
+        state_df = df.groupby(
             ["airport_code", "week_of_year"]).agg(week_time_agg).reset_index().drop("week_of_year",axis=1)
             
     else:
-        state_df = df.groupby([df.airport_code.map(agg.airports_to_states), "date"]).agg(location_agg
-                                                                                         ).reset_index().groupby(
+        state_df = df.groupby(
             ["airport_code", pd.Grouper(key="date", freq=period)]).agg(time_agg).reset_index()
-    # merges number of airports per state as a column to each entry. Used to normalize
-    state_df = state_df.merge(
-        pd.DataFrame.from_dict({k: [len(v)] for k, v in agg.states_to_airports.items()}, orient='index',
-                               columns=["aiport_count"]), left_on="airport_code", right_index=True)
-
-    # Linear transforms on data.
-    state_df.temp_24h_mean = state_df.temp_24h_mean.apply(c_to_f)
-    state_df.rain_and_sleet = state_df.rain_and_sleet.apply(mm_to_inch)
-    state_df.rain_count = state_df.rain_count.divide(state_df['aiport_count'], axis=0)
-    state_df.weekend_rain_count = state_df.weekend_rain_count.divide(state_df['aiport_count'], axis=0)
-    state_df.snow = state_df.snow.apply(mm_to_inch)
-    state_df.snow_count = state_df.snow_count.divide(state_df['aiport_count'], axis=0)
-    state_df.weekend_snow_count = state_df.weekend_snow_count.divide(state_df['aiport_count'], axis=0)
-    state_df.sleet = state_df.sleet.apply(mm_to_inch)
-    state_df.sleet_count = state_df.sleet_count.divide(state_df['aiport_count'], axis=0)
-    state_df.weekend_sleet_count = state_df.weekend_sleet_count.divide(state_df['aiport_count'], axis=0)
-    state_df.cold_count = state_df.cold_count.divide(state_df['aiport_count'], axis=0)
-    state_df.weekend_cold_count = state_df.weekend_cold_count.divide(state_df['aiport_count'], axis=0)
-    state_df.heat_count = state_df.heat_count.divide(state_df['aiport_count'], axis=0)
-    state_df.weekend_heat_count = state_df.weekend_heat_count.divide(state_df['aiport_count'], axis=0)
 
     df_list = aggregate(state_df, companies, list(location_agg.keys()))
-
-    all_states = pd.DataFrame(data={})
-    all_regions = pd.DataFrame(data={})
-    for company in companies:
-        region_weights, state_weights = region_and_state_weights(company.locations)
-        region_weights.insert(0, column="Ticker", value=f'{company.ticker}')
-        state_weights.insert(0, column="Ticker", value=f'{company.ticker}')
-        all_states = all_states.append(state_weights)
-        all_regions = all_regions.append(region_weights)
-
-    df_list.append(("Region Weights", all_regions))
-    df_list.append(("State Weights", all_states))
-
     return df_list
+
+def attach_store_counts(df,ticker):
+    df = df.copy()
+    store_count_request_json = requests.get(f'https://5y8t2c1iwb.execute-api.us-east-1.amazonaws.com/api/places/{ticker}').json()
+    airport_to_store_count = {d["airport_code"]:d["count"] for d in store_count_request_json[0]["store_counts"]}
+    df["store_count"]  = df.airport_code.map(airport_to_store_count).fillna(0.0)
+    return df
 
 
 def aggregate(df1: pd.DataFrame, companies: list, value_names: list):
@@ -364,30 +275,38 @@ def aggregate(df1: pd.DataFrame, companies: list, value_names: list):
     company_metric_dict = {}
     for company in companies:
         company_metric_dict[company] = {}
-        region_weights, state_weights = region_and_state_weights(company.locations)
+        # region_weights, state_weights = region_and_state_weights(company.locations)
 
         logger.debug(f'Analysing: {company.ticker}')
+        
+        # add in weights
+        # create total and regional dfs
 
-        # apply state weights
-        state_weighted_df = state_df.merge(state_weights['store_count'], left_on="airport_code", right_on="iso-region")
-        state_weighted_df[value_names] = state_weighted_df[value_names].mul(state_weighted_df.store_count, axis=0)
+        state_df = attach_store_counts(state_df,company.ticker)
+        state_df = state_df.fillna(0.0)
+        weighted_mean = lambda x: 0 if state_df.loc[x.index, "store_count"].sum() == 0 or pd.isna(state_df.loc[x.index, "store_count"].sum()) else np.average(x, weights=state_df.loc[x.index, "store_count"])
 
-        # groupby region
-        region_group_df = state_weighted_df.groupby(["date", state_weighted_df.airport_code.map(
-            agg.states_to_regions)]).sum().reset_index()
+ 
 
-        # apply region weights to get nationwide results
-        total_weight_df = region_group_df.merge(region_weights['store_count'], left_on="airport_code",
-                                                right_on="region", suffixes=("", "_region"))
-        total_weight_df[value_names] = total_weight_df[value_names].mul(total_weight_df.store_count_region, axis=0)
-        total_weight_df = total_weight_df.groupby(["airport_code", "date"], as_index=False).sum()
+        total_group_df = state_df.groupby(["date"]).agg(weighted_mean).reset_index()
+        total_group_df["region"] = "Total"
+        state_df["region"] = state_df.airport_code.map(agg.airport_to_region)
+        state_df = state_df.drop("airport_code",axis=1)
 
-        # add total row
+        # test_group = state_df[~state_df.region.isna()].groupby(["date", "region"])
+        
+        # for c in state_df.columns:
+        #     if c == "date" or c=="region":
+        #         continue
+        #     print(c)
+        #     print(test_group[[c]].agg(weighted_mean))
+        region_group_df = state_df[~state_df.region.isna()].groupby(["date", "region"]).agg(weighted_mean).reset_index()
+
         for v in value_names:
             output_df = pd.DataFrame(
-                region_group_df.pivot(index="date", columns="airport_code", values=v).sort_index(ascending=False).T)
-            output_df = output_df.append(pd.DataFrame(
-                total_weight_df.pivot(index="date", columns="airport_code", values=v).sort_index(ascending=False).T.sum(), columns=["Total"]).T)
+                region_group_df.pivot(index="date", columns="region", values=v).sort_index(ascending=False).T)
+            output_df = output_df.append(
+                total_group_df.pivot(index="date", columns="region", values=v).sort_index(ascending=False).T)
             # add ticker column
             output_df.insert(0, column="Ticker", value=f'{company.ticker}')
             company_metric_dict[company][v] = output_df

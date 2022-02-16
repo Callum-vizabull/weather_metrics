@@ -264,6 +264,9 @@ default_state_airport_mappings = {"US-AK": ['PAMR'],
 states_to_airports = default_state_airport_mappings
 airports_to_states = inverse_map(states_to_airports)
 
+airport_to_region = {}
+for k in airports_to_states.keys():
+    airport_to_region[k] = states_to_regions[airports_to_states[k]]
 all_analysed_tickers = [
     "HOME",
     "HOG",

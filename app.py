@@ -7,6 +7,7 @@ app = Chalice(app_name='weather_metrics')
 from chalicelib import test 
 from chalicelib import signing
 import chalicelib.test as create_dataframes
+import chalicelib.create_periodic_data as create_periodic_data
 @app.route('/')
 def index():
     return {'hello': 'world'}
@@ -52,6 +53,10 @@ def sign_metrics(event):
     return schedulers.run_apply_sign()
     
 import os
+### Queue listeners
+@app.on_sqs_message(queue=os.environ['BUILD_PERIODIC_METRICS_QUEUE'], batch_size=1)
+def update_periodic_metrics(event):
+    return create_periodic_data.write_periodic_date(event)
 @app.on_sqs_message(queue=os.environ['WEATHER_BACKTESTING_QUEUE'], batch_size=1)
 def update_backtesting(event):
     return test.save_backtesting(event)
